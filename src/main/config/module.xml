@@ -1,0 +1,15 @@
+<module xmlns="urn:jboss:module:1.3" name="fr.sii.keycloak.mapper.json-remote-claim">
+  <resources>
+    <resource-root path="json-remote-claim.jar"/>
+    <resource-root path="./"/>
+  </resources>
+  <dependencies>
+    <module name="org.keycloak.keycloak-core"/>
+    <module name="org.keycloak.keycloak-server-spi"/>
+    <module name="org.keycloak.keycloak-server-spi-private"/>
+    <module name="org.keycloak.keycloak-services"/>
+    <module name="org.jboss.logging"/>
+    <module name="javax.ws.rs.api"/>
+    <module name="com.fasterxml.jackson.core.jackson-databind"/>
+  </dependencies>
+</module>
