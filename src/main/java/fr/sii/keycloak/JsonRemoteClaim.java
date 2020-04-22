@@ -24,7 +24,7 @@ public class JsonRemoteClaim extends AbstractOIDCProtocolMapper implements OIDCA
     private final static String REMOTE_PARAMETERS = "remote.parameters";
     private final static String REMOTE_PARAMETERS_USERNAME = "remote.parameters.username";
     private final static String REMOTE_PARAMETERS_CLIENTID = "remote.parameters.clientid";
-    private static final String REMOTE_PARAMETERS_USER_ATTRIBUTES = "user.attributes.as.claims";
+    private static final String REMOTE_PARAMETERS_USER_ATTRIBUTES = "remote.parameters.user.attributes";
     private static final String REMOTE_HEADERS_BEARER_TOKEN = "remote.headers.bearer.token";
     private static final String CLIENT_AUTH_URL = "client.auth.url";
     private static final String CLIENT_AUTH_ID = "client.auth.id";
