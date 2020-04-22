@@ -1,21 +1,14 @@
 package fr.sii.keycloak;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import org.apache.http.HttpHeaders;
 import org.keycloak.models.*;
 import org.keycloak.protocol.oidc.mappers.*;
 import org.keycloak.provider.ProviderConfigProperty;
 import org.keycloak.representations.IDToken;
+import org.keycloak.utils.MediaType;
 
-import javax.ws.rs.client.Client;
-import javax.ws.rs.client.ClientBuilder;
-import javax.ws.rs.client.Invocation;
-import javax.ws.rs.client.WebTarget;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -31,8 +24,12 @@ public class JsonRemoteClaim extends AbstractOIDCProtocolMapper implements OIDCA
     private final static String REMOTE_PARAMETERS = "remote.parameters";
     private final static String REMOTE_PARAMETERS_USERNAME = "remote.parameters.username";
     private final static String REMOTE_PARAMETERS_CLIENTID = "remote.parameters.clientid";
+    private static final String REMOTE_PARAMETERS_USER_ATTRIBUTES = "remote.parameters.user.attributes";
+    private static final String REMOTE_HEADERS_BEARER_TOKEN = "remote.headers.bearer.token";
+    private static final String CLIENT_AUTH_URL = "client.auth.url";
+    private static final String CLIENT_AUTH_ID = "client.auth.id";
+    private static final String CLIENT_AUTH_PASS = "client.auth.pass";
 
-    private static Client client = ClientBuilder.newClient();
 
     /**
      * Inner configuration to cache retrieved authorization for multiple tokens
@@ -69,6 +66,14 @@ public class JsonRemoteClaim extends AbstractOIDCProtocolMapper implements OIDCA
         property.setDefaultValue("false");
         configProperties.add(property);
 
+        // User attributes
+        property = new ProviderConfigProperty();
+        property.setName(REMOTE_PARAMETERS_USER_ATTRIBUTES);
+        property.setLabel("User attributes");
+        property.setType(ProviderConfigProperty.STRING_TYPE);
+        property.setHelpText("Send custom user attributes as query parameter. Separate value by '&' sign.");
+        configProperties.add(property);
+
         // URL
         property = new ProviderConfigProperty();
         property.setName(REMOTE_URL);
@@ -91,6 +96,38 @@ public class JsonRemoteClaim extends AbstractOIDCProtocolMapper implements OIDCA
         property.setLabel("Headers");
         property.setType(ProviderConfigProperty.STRING_TYPE);
         property.setHelpText("List of headers to send separated by '&'. Separate header name and value by an equals sign '=', the value can contain equals signs (ex: Authorization=az89d).");
+        configProperties.add(property);
+
+        // Bearer token
+        property = new ProviderConfigProperty();
+        property.setName(REMOTE_HEADERS_BEARER_TOKEN);
+        property.setLabel("Send bearer token");
+        property.setType(ProviderConfigProperty.BOOLEAN_TYPE);
+        property.setHelpText("Send the bearer token as auth header.");
+        configProperties.add(property);
+
+        // Client auth url
+        property = new ProviderConfigProperty();
+        property.setName(CLIENT_AUTH_URL);
+        property.setLabel("Client auth URL");
+        property.setType(ProviderConfigProperty.STRING_TYPE);
+        property.setHelpText("Full URL of the keycloak client auth endpoint.");
+        configProperties.add(property);
+
+        // Client id
+        property = new ProviderConfigProperty();
+        property.setName(CLIENT_AUTH_ID);
+        property.setLabel("Client id");
+        property.setType(ProviderConfigProperty.STRING_TYPE);
+        property.setHelpText("Client id to create a tech token.");
+        configProperties.add(property);
+
+        // Client password
+        property = new ProviderConfigProperty();
+        property.setName(CLIENT_AUTH_PASS);
+        property.setLabel("Client password");
+        property.setType(ProviderConfigProperty.STRING_TYPE);
+        property.setHelpText("Client password to create a tech token.");
         configProperties.add(property);
     }
 
@@ -123,7 +160,7 @@ public class JsonRemoteClaim extends AbstractOIDCProtocolMapper implements OIDCA
     protected void setClaim(IDToken token, ProtocolMapperModel mappingModel, UserSessionModel userSession, KeycloakSession keycloakSession, ClientSessionContext clientSessionCtx) {
         JsonNode claims = clientSessionCtx.getAttribute(REMOTE_AUTHORIZATION_ATTR, JsonNode.class);
         if (claims == null) {
-            claims =  getRemoteAuthorizations(mappingModel, userSession);
+            claims = getRemoteAuthorizations(mappingModel, userSession, clientSessionCtx);
             clientSessionCtx.setAttribute(REMOTE_AUTHORIZATION_ATTR, claims);
         }
 
@@ -139,26 +176,30 @@ public class JsonRemoteClaim extends AbstractOIDCProtocolMapper implements OIDCA
      */
     @Override
     protected void setClaim(IDToken token, ProtocolMapperModel mappingModel, UserSessionModel userSession) {
-        JsonNode claims = getRemoteAuthorizations(mappingModel, userSession);
+        JsonNode claims = getRemoteAuthorizations(mappingModel, userSession, null);
         OIDCAttributeMapperHelper.mapClaim(token, mappingModel, claims);
     }
 
-    private Map<String, String> getQueryParameters(ProtocolMapperModel mappingModel, UserSessionModel userSession) {
+    private Map<String, String> getQueryParameters(ProtocolMapperModel mappingModel, UserSessionModel userSession, ClientSessionContext clientSessionCtx) {
         final String configuredParameter = mappingModel.getConfig().get(REMOTE_PARAMETERS);
         final boolean sendUsername = "true".equals(mappingModel.getConfig().get(REMOTE_PARAMETERS_USERNAME));
         final boolean sendClientID = "true".equals(mappingModel.getConfig().get(REMOTE_PARAMETERS_CLIENTID));
+        final String configuredUserAttributes = mappingModel.getConfig().get(REMOTE_PARAMETERS_USER_ATTRIBUTES);
 
         // Get parameters
-        final Map<String, String> formattedParameters = buildMapFromStringConfig(configuredParameter);
+        final Map<String, String> formattedParameters = Utils.buildMapFromStringConfig(configuredParameter);
 
         // Get client ID
         if (sendClientID) {
-            String clientID = userSession.getAuthenticatedClientSessions().values().stream()
-                    .map(AuthenticatedClientSessionModel::getClient)
-                    .map(ClientModel::getClientId)
-                    .distinct()
-                    .collect( Collectors.joining( "," ) );
-            formattedParameters.put("client_id", clientID);
+            if (clientSessionCtx != null) {
+                formattedParameters.put("client_id", clientSessionCtx.getClientSession().getClient().getId());
+            } else {
+                formattedParameters.put("client_id", userSession.getAuthenticatedClientSessions().values().stream()
+                        .map(AuthenticatedClientSessionModel::getClient)
+                        .map(ClientModel::getClientId)
+                        .distinct()
+                        .collect(Collectors.joining(",")));
+            }
         }
 
         // Get username
@@ -166,76 +207,55 @@ public class JsonRemoteClaim extends AbstractOIDCProtocolMapper implements OIDCA
             formattedParameters.put("username", userSession.getLoginUsername());
         }
 
+        // Get custom user attributes
+        if (configuredUserAttributes != null && !"".equals(configuredUserAttributes.trim())) {
+            List<String> userAttributes = Arrays.asList(configuredUserAttributes.trim().split("&"));
+            userAttributes.forEach(attribute -> formattedParameters.put(attribute, userSession.getUser().getFirstAttribute(attribute)));
+        }
         return formattedParameters;
     }
 
     private Map<String, String> getheaders(ProtocolMapperModel mappingModel, UserSessionModel userSession) {
         final String configuredHeaders = mappingModel.getConfig().get(REMOTE_HEADERS);
+        final boolean sendBearerToken = "true".equals(mappingModel.getConfig().get(REMOTE_HEADERS_BEARER_TOKEN));
 
         // Get headers
-        return buildMapFromStringConfig(configuredHeaders);
-    }
-
-    private Map<String, String> buildMapFromStringConfig(String config) {
-        final Map<String, String> map = new HashMap<>();
-
-        //FIXME: using MULTIVALUED_STRING_TYPE would be better but it doesn't seem to work
-        if (config != null && !"".equals(config.trim())) {
-            String[] configList = config.trim().split("&");
-            String[] keyValue;
-            for (String configEntry : configList) {
-                keyValue = configEntry.split("=", 2);
-                if (keyValue.length == 2) {
-                    map.put(keyValue[0], keyValue[1]);
-                }
-            }
+        Map<String, String> stringStringMap = Utils.buildMapFromStringConfig(configuredHeaders);
+        if (sendBearerToken) {
+            String signedRequestToken = getClientToken(mappingModel);
+            stringStringMap.put(HttpHeaders.AUTHORIZATION, "Bearer " + signedRequestToken);
         }
-
-        return map;
+        return stringStringMap;
     }
 
-    private JsonNode getRemoteAuthorizations(ProtocolMapperModel mappingModel, UserSessionModel userSession) {
+    private String getClientToken(ProtocolMapperModel mappingModel) {
         // Get parameters
-        Map<String, String> parameters = getQueryParameters(mappingModel, userSession);
+        Map<String, String> parameters = new HashMap<>();
+        // Get headers
+        Map<String, String> headers = new HashMap<>();
+
+        Map<String, String> formParameters = new HashMap<>();
+        formParameters.put("grant_type", "client_credentials");
+        formParameters.put("client_id", mappingModel.getConfig().get(CLIENT_AUTH_ID));
+        formParameters.put("client_secret", mappingModel.getConfig().get(CLIENT_AUTH_PASS));
+
+        // Call remote service
+        String baseUrl = mappingModel.getConfig().get(CLIENT_AUTH_URL);
+        JsonNode jsonNode = HttpHandler.getJsonNode(baseUrl, MediaType.APPLICATION_FORM_URLENCODED, headers, parameters, formParameters);
+        if (!jsonNode.has("access_token")) {
+            throw new JsonRemoteClaimException("Access token not found", baseUrl);
+        }
+        return jsonNode.findValue("access_token").asText();
+    }
+
+    private JsonNode getRemoteAuthorizations(ProtocolMapperModel mappingModel, UserSessionModel userSession, ClientSessionContext clientSessionCtx) {
+        // Get parameters
+        Map<String, String> parameters = getQueryParameters(mappingModel, userSession, clientSessionCtx);
         // Get headers
         Map<String, String> headers = getheaders(mappingModel, userSession);
 
         // Call remote service
-        Response response;
-        final String url = mappingModel.getConfig().get(REMOTE_URL);
-        try {
-            WebTarget target = client.target(url);
-            // Build parameters
-            for (Map.Entry<String, String> param : parameters.entrySet()) {
-                target = target.queryParam(param.getKey(), param.getValue());
-            }
-            Invocation.Builder builder = target.request(MediaType.APPLICATION_JSON);
-            // Build headers
-            for (Map.Entry<String, String> header : headers.entrySet()) {
-                builder = builder.header(header.getKey(), header.getValue());
-            }
-            // Call
-            response = builder.get();
-        } catch(RuntimeException e) {
-            // exceptions are thrown to prevent token from being delivered without all information
-            throw new JsonRemoteClaimException("Error when accessing remote claim", url, e);
-        }
-
-        // Check response status
-        if (response.getStatus() != 200) {
-            response.close();
-            throw new JsonRemoteClaimException("Wrong status received for remote claim - Expected: 200, Received: " + response.getStatus(), url);
-        }
-
-        // Bind JSON response
-        try {
-            return response.readEntity(JsonNode.class);
-        } catch(RuntimeException e) {
-            // exceptions are thrown to prevent token from being delivered without all information
-            throw new JsonRemoteClaimException("Error when parsing response for remote claim", url, e);
-        } finally {
-            response.close();
-        }
-
+        String baseUrl = mappingModel.getConfig().get(REMOTE_URL);
+        return HttpHandler.getJsonNode(baseUrl, MediaType.APPLICATION_JSON, headers, parameters, null);
     }
 }

@@ -13,8 +13,8 @@
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <keycloak.version>8.0.1</keycloak.version>
-        <java.version>1.8</java.version>
+        <keycloak.version>9.0.2</keycloak.version>
+        <java.version>11</java.version>
     </properties>
 
     <build>
@@ -34,11 +34,11 @@
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-jar-plugin</artifactId>
-                    <version>3.1.1</version>
+                    <version>3.2.0</version>
                     <configuration>
                         <archive>
                             <manifestEntries>
-                                <Dependencies>org.keycloak.keycloak-core,org.keycloak.keycloak-server-spi,org.keycloak.keycloak-server-spi-private,org.keycloak.keycloak-services</Dependencies>
+                                <Dependencies>java.net.http,org.keycloak.keycloak-core,org.keycloak.keycloak-server-spi,org.keycloak.keycloak-server-spi-private,org.keycloak.keycloak-services</Dependencies>
                             </manifestEntries>
                         </archive>
                     </configuration>
